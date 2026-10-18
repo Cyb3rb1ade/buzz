@@ -157,7 +157,7 @@ impl KokoroGerman {
     }
 
     pub fn is_runtime_usable(model_dir: &Path) -> bool {
-        Self::is_available(model_dir)
+        Self::is_available(model_dir) && espeak_can_run()
     }
 
     pub fn load(model_dir: &Path) -> Result<Self, String> {
@@ -269,21 +269,79 @@ fn split_phonemes(phonemes: &str) -> Vec<String> {
     chunks
 }
 
+fn espeak_binary() -> PathBuf {
+    resolve_espeak_binary(bundled_espeak_candidates())
+}
+
+fn espeak_can_run() -> bool {
+    let binary = espeak_binary();
+    binary.is_file() || Command::new(binary).arg("--version").output().is_ok()
+}
+
+fn resolve_espeak_binary(candidates: Vec<PathBuf>) -> PathBuf {
+    if let Some(path) = std::env::var_os("BUZZ_ESPEAK_NG") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return path;
+        }
+    }
+    if let Some(path) = candidates.into_iter().find(|path| path.is_file()) {
+        return path;
+    }
+    if cfg!(windows) {
+        PathBuf::from("espeak-ng.exe")
+    } else {
+        PathBuf::from("espeak-ng")
+    }
+}
+
+fn bundled_espeak_candidates() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(appdir) = std::env::var_os("APPDIR") {
+        let appdir = PathBuf::from(appdir);
+        paths.push(appdir.join("usr/lib/Buzz/espeak-ng/espeak-ng"));
+        paths.push(appdir.join("usr/lib/buzz/espeak-ng/espeak-ng"));
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return paths;
+    };
+    let Some(dir) = exe.parent() else {
+        return paths;
+    };
+    let names = if cfg!(windows) {
+        ["espeak-ng.exe"]
+    } else {
+        ["espeak-ng"]
+    };
+    for name in names {
+        paths.push(dir.join("../Resources/espeak-ng").join(name));
+        paths.push(dir.join("../lib/Buzz/espeak-ng").join(name));
+        paths.push(dir.join("../lib/buzz/espeak-ng").join(name));
+        paths.push(dir.join("espeak-ng").join(name));
+        paths.push(dir.join("resources/espeak-ng").join(name));
+    }
+    paths
+}
+
 fn phonemize_german(text: &str, data_parent: &Path) -> Result<String, String> {
-    let output = Command::new("espeak-ng")
+    let binary = espeak_binary();
+    let output = Command::new(&binary)
         .args(["-v", "de", "--ipa=3", "-q"])
         .arg(format!("--path={}", data_parent.display()))
         .arg(text)
         .output()
         .or_else(|_| {
-            Command::new("espeak")
+            Command::new(if cfg!(windows) { "espeak.exe" } else { "espeak" })
                 .args(["-v", "de", "--ipa=3", "-q"])
                 .arg(format!("--path={}", data_parent.display()))
                 .arg(text)
                 .output()
         })
         .map_err(|error| {
-            format!("espeak-ng is required for German Kokoro TTS: {error}")
+            format!(
+                "bundled espeak-ng is required for German Kokoro TTS ({}): {error}",
+                binary.display()
+            )
         })?;
     if !output.status.success() {
         return Err(format!(
@@ -558,6 +616,15 @@ mod tests {
             KokoroGerman::is_runtime_usable(dir),
             "Martin ONNX should run via ONNX Runtime without sherpa metadata"
         );
+    }
+
+    #[test]
+    fn prefers_a_bundled_espeak_binary() {
+        let dir = tempfile::tempdir().unwrap();
+        let bundled = dir.path().join("espeak-ng");
+        std::fs::write(&bundled, b"bin").unwrap();
+        let resolved = resolve_espeak_binary(vec![bundled.clone()]);
+        assert_eq!(resolved, bundled);
     }
 
     #[test]

@@ -37,6 +37,7 @@ jobs:
             -o Acquire::https::Timeout=30 \
             -o DPkg::Lock::Timeout=120 \
             build-essential \
+            cmake \
             ca-certificates \
             curl \
             desktop-file-utils \
