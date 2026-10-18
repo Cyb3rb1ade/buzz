@@ -10,7 +10,7 @@
       "wait": false
     },
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build && ../scripts/bundle-espeak-ng.sh",
+    "beforeBuildCommand": "pnpm build && bash ../scripts/bundle-espeak-ng.sh",
     "frontendDist": "../dist"
   },
   "app": {
